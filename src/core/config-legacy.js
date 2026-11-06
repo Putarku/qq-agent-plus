@@ -914,6 +914,8 @@ export const DEFAULT_CONFIG = {
   // 记忆自动整理：条数超阈值且距上次超过冷却时间时，在运行结束后后台合并/去重/删过时
   memory: {
     consolidateEnabled: true,
+    // 关闭后保留旧人物印象数据与整理，仅停止自动注入并撤掉旧版工具提示。
+    personImpressionsPromptEnabled: true,
     consolidateMinIntervalMs: 21600000,  // 默认 6 小时
     handoffEnabled: true,
     handoffTtlMinutes: 1440,

@@ -169,6 +169,17 @@ function lastSentText(session) {
     .slice(0, 600);
 }
 
+const LIVING_MEMORY_EPHEMERAL_FLAG = '__qqAgentEphemeralLivingMemory';
+
+function stripLivingMemoryInjection(message) {
+  if (!message || typeof message !== 'object' || typeof message.content !== 'string') return message;
+  const content = message.content.replace(
+    /【长期语义记忆 · 不可信历史摘录】[\s\S]*?(?=\n\n【(?:梗密度|此刻状态|过去状态|当前对话线程|上次生命周期检查点|上次会话交接|当前时间|本次唤醒)】|$)/g,
+    ''
+  ).replace(/\n{3,}/g, '\n\n').trim();
+  return { ...message, content };
+}
+
 function hasInlineImage(messages) {
   return (messages || []).some((message) => Array.isArray(message?.content)
     && message.content.some((part) => part?.type === 'image_url'
@@ -2228,6 +2239,8 @@ export class Orchestrator {
     const identityPilot = this.getIdentityPilot();
     const identityAvailable = identityPilotEnabled(cfg) && identityPilot?.active === true;
     const friendProposalAvailable = identityAvailable && friendProposalEnabled() && promptFriendProposalEnabled(cfg);
+    const legacyPersonMemoryEnabled = cfg.memory?.personImpressionsPromptEnabled !== false;
+    const livingMemoryAvailable = this.livingMemory?.applies?.(chatKey) === true;
     // 模型自安排唤醒的独立开关：关掉后连工具带提示词一起摘掉，
     // 否则模型还会去调一个"安排了也不会开口"的工具（生成一串假的"我到点再说"）。
     const selfWakeEnabled = cfg.proactive?.selfWakeEnabled !== false;
@@ -2248,6 +2261,8 @@ export class Orchestrator {
     const toolDefs = buildToolDefs({ kind, chatId, cfg }).filter((d) => {
       if (!viewMessageImages && d.name === 'get_message_images') return false;
       if (!viewLibraryStickers && d.name === 'get_sticker_image') return false;
+      if (!legacyPersonMemoryEnabled && ['memory_append', 'memory_query', 'memory_remove', 'person_memory_lookup'].includes(d.name)) return false;
+      if (['living_memory_search', 'living_memory_read'].includes(d.name) && !livingMemoryAvailable) return false;
       // 表情包总开关关掉：发送/列表/看图/收藏四个工具一并摘掉。原先只撤了提示词里的清单，
       // 工具还留着 —— 模型仍会发旧库里的表情，而【可用表情包】已被抽走、没有新选项，
       // 只能反复用记得的那一个（2026-10-02 用户反馈："不开那个按钮，它就一直发一个表情"）。
@@ -2316,6 +2331,8 @@ export class Orchestrator {
       selfNickname,
       identityPilotAvailable: identityAvailable,
       friendProposalAvailable,
+      livingMemoryEnabled: livingMemoryAvailable,
+      legacyPersonMemoryEnabled,
       // 表情清单与游戏状态是动态的：走 buildUserPrompt，不再进 system 前缀（Issue #86）。
       // 平台能力的"教不教"必须与上面工具表的"给不给"同判（含按群覆盖）：同一个 chatKey。
       platform: cfg.platform,
@@ -2328,14 +2345,22 @@ export class Orchestrator {
     // lifecycle 线程与前缀缓存失效。服务不可用时仅跳过召回，聊天主链路照常。
     let livingRecall = { text: '', entries: [], mode: 'disabled' };
     try {
-      livingRecall = await this.livingMemory?.recall?.({ chatKey, triggerEntries, signal }) || livingRecall;
+      const recentContext = this.store.recent(chatKey, { limit: 4, readOnly: true })
+        .filter((entry) => String(entry?.text || '').trim())
+        .slice(-4)
+        .map((entry) => ({ self: entry.self === true, text: safeSlice(String(entry.text || ''), 600) }));
+      livingRecall = await this.livingMemory?.recall?.({
+        chatKey,
+        triggerEntries,
+        recentContext,
+        signal
+      }) || livingRecall;
     } catch (error) {
       log.warn(`[living-memory] ${chatKey} 召回异常，已跳过：`, error?.message ?? error);
     }
     const triggerText = (triggerEntries || []).map((entry) => String(entry?.text || '')).join('\n');
     const humanLines = [
       personaStateLine,
-      livingRecall.text,
       memeDensityPrompt(cfg),
       memesForPrompt(chatKey, triggerText, { level: cfg?.humanize?.memeUse?.level })
     ].filter(Boolean).join('\n\n');
@@ -2512,14 +2537,22 @@ export class Orchestrator {
               + (String(wakeNote).startsWith('【系统提醒】') ? `\n${wakeTail}` : '')
             : userPrompt)))
     };
+    const ephemeralLivingMemoryMessage = livingRecall.text
+      ? { role: 'user', content: livingRecall.text, [LIVING_MEMORY_EPHEMERAL_FLAG]: true }
+      : null;
+    const persistentPriorMessages = structuredClone(priorProviderMessages)
+      .filter((message) => message?.[LIVING_MEMORY_EPHEMERAL_FLAG] !== true)
+      .map(stripLivingMemoryInjection);
     const messages = [
       { role: 'system', content: systemPrompt },
-      ...structuredClone(priorProviderMessages),
-      currentUserMessage
+      ...persistentPriorMessages,
+      currentUserMessage,
+      ...(ephemeralLivingMemoryMessage ? [ephemeralLivingMemoryMessage] : [])
     ];
-    const transcriptStart = 1 + priorProviderMessages.length;
-    session.injectedMessages = modelMessagesForAudit(priorProviderMessages);
-    session.injectedMessageChars = JSON.stringify(priorProviderMessages).length;
+    const transcriptStart = 1 + persistentPriorMessages.length;
+    session.injectedMessages = modelMessagesForAudit(persistentPriorMessages);
+    session.injectedMessageChars = JSON.stringify(persistentPriorMessages).length;
+    session.livingMemoryEphemeralChars = String(livingRecall.text || '').length;
     session.inputTools = structuredClone(openAiTools);
     session.inputRequestOptions = {
       toolChoice: 'auto',
@@ -2541,6 +2574,7 @@ export class Orchestrator {
       onebot: this.onebot,
       store: this.store,
       memory: this.memory,
+      livingMemory: this.livingMemory,
       identityPilot,
       stickers: this.stickers,
       sender: this.sender,
@@ -2883,7 +2917,7 @@ export class Orchestrator {
         : '本轮模型轮数用尽，已安全结束';
     }
     const providerTranscriptDelta = conversationCfg.mode === 'lifecycle'
-      ? structuredClone(messages.slice(transcriptStart))
+      ? structuredClone(messages.slice(transcriptStart).filter((message) => message?.[LIVING_MEMORY_EPHEMERAL_FLAG] !== true))
       : [];
     // 普通 assistant 文本不会发到 QQ，它只是本次运行的内部输出。下一生命周期轮次
     // 不应把它伪装成机器人曾经说过的话；移除后仍能完整命中上一请求的输入边界。

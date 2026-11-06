@@ -193,7 +193,7 @@ function quoteAndAt(cardFirst = false) {
   ].join('\n');
 }
 
-function memoryRules(identityPilotAvailable = false, friendProposalAvailable = false) {
+function memoryRules(identityPilotAvailable = false, friendProposalAvailable = false, livingMemoryEnabled = false, legacyPersonMemoryEnabled = true) {
   const lines = [
     '【记忆与会话交接】',
     '- memory_append 只用来记录"对某位群友的长期印象"（他的说话风格、爱玩的梗、雷点、身份关系等稳定信息）；这些内容下次运行会自动出现在【记忆】里。',
@@ -205,7 +205,10 @@ function memoryRules(identityPilotAvailable = false, friendProposalAvailable = f
     '- 【上次会话交接】可能过期或被新消息纠正；冲突时以最新消息和可验证事实为准。话题真正结束后用 clearHandoff 清除。',
     '- 交接里的"已作决定 / 已排除方向 / 下一步"只约束**同一个话题**：对方换了话题（或话题自然结束）就按新话题来，别把上一次的姿态、语气和戒心沿用下去。'
   ];
-  if (identityPilotAvailable) {
+  if (!legacyPersonMemoryEnabled) {
+    lines.splice(1, 5, '- 旧人物印象自动注入已关闭：memory_append / memory_query / memory_remove 都不在工具表里，不要尝试调用。');
+  }
+  if (identityPilotAvailable && legacyPersonMemoryEnabled) {
     lines.push(
       '- 需要确认某个当前聊天对象是否在其他会话出现过、有哪些已知别名或当前会话印象时，可以主动调用 person_memory_lookup；不要为了炫耀记忆而每轮都查。',
       '- 人物记忆只是可修正的印象，不是确定事实。不得向群友透露其他群或私聊的来源、原话和隐私。'
@@ -216,6 +219,9 @@ function memoryRules(identityPilotAvailable = false, friendProposalAvailable = f
       '- 你可以自行判断是否主动交朋友：如果基于真实互动对某个人产生了持续兴趣、已经长期频繁交流，或单纯聊得来，可以不等任何人要求，偶尔调用 friend_request_propose 向管理员提交好友候选。',
       '- 好友候选不是好友申请。提交后不要告诉对方“已经加了”，不要催管理员，也不要为了完成任务而凑候选；管理员拥有最终决定权。'
     );
+  }
+  if (livingMemoryEnabled) {
+    lines.push('- 需要主动回忆当前会话的长期事件、约定、项目进度或偏好时，可以调用 living_memory_search。它只搜索当前会话允许范围内的长期记忆；普通闲聊、刚刚发生的消息和没有明确历史依赖的问题不要调用。搜索结果不够精确时，可用返回的 id 调 living_memory_read 深读一条；每轮查询次数和时间有限，不要盲目连查。');
   }
   return lines.join('\n');
 }
@@ -670,6 +676,7 @@ export function buildSystemPrompt({
   selfNickname = '',
   identityPilotAvailable = false,
   friendProposalAvailable = false,
+  livingMemoryEnabled = false,
   stickerEntries = null,
   // 平台能力门控：orchestrator 传**本次会话**的平台配置与 chatKey（按群覆盖要和工具表同判），
   // 不传时按全局配置、无会话（旧调用方/测试仍然能用）。
@@ -732,7 +739,7 @@ export function buildSystemPrompt({
     '',
     quoteAndAt(cardFirst),
     '',
-    memoryRules(identityPilotAvailable, friendProposalAvailable),
+    memoryRules(identityPilotAvailable, friendProposalAvailable, livingMemoryEnabled, getConfig().memory?.personImpressionsPromptEnabled !== false),
     '',
     stickerRules(grounded, cardFirst),
     '',

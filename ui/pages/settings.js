@@ -785,6 +785,9 @@ function renderMemorySettingsSection(c) {
     <h3 id="settings-memory">记忆整理</h3>
     <div class="checkbox-row"><input type="checkbox" id="cfg-mem-consolidate" ${mem.consolidateEnabled !== false ? 'checked' : ''} />
       <label for="cfg-mem-consolidate">启用记忆自动整理</label></div>
+    <div class="checkbox-row"><input type="checkbox" id="cfg-mem-person-impressions-prompt" ${mem.personImpressionsPromptEnabled !== false ? 'checked' : ''} />
+      <label for="cfg-mem-person-impressions-prompt">将旧人物印象自动注入聊天提示词</label></div>
+    <div class="hint">关闭后不会删除旧人物印象；长期语义记忆仍按其独立设置工作。</div>
     <div class="checkbox-row"><input type="checkbox" id="cfg-mem-handoff" ${mem.handoffEnabled !== false ? 'checked' : ''} />
       <label for="cfg-mem-handoff">允许模型自动写「会话交接」（下次唤醒时带上）</label></div>
     <div class="checkbox-row"><input type="checkbox" id="cfg-mem-usechat" ${useChat ? 'checked' : ''} />

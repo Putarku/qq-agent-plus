@@ -181,6 +181,7 @@ async function saveConfig({ quiet = false } = {}) {
     patch.memory = {
       ...(c.memory || {}),
       consolidateEnabled: chk('#cfg-mem-consolidate', c.memory?.consolidateEnabled !== false),
+      personImpressionsPromptEnabled: chk('#cfg-mem-person-impressions-prompt', c.memory?.personImpressionsPromptEnabled !== false),
       handoffEnabled: chk('#cfg-mem-handoff', c.memory?.handoffEnabled !== false),
       useChatModel: chk('#cfg-mem-usechat', c.memory?.useChatModel !== false),
       provider: val('#cfg-mem-provider', c.memory?.provider || '').trim(),

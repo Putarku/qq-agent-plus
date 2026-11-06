@@ -12,6 +12,8 @@ export const EXPERIMENTAL_READ_ONLY_TOOLS = new Set([
   'get_active_members',
   'memory_query',
   'person_memory_lookup',
+  'living_memory_search',
+  'living_memory_read',
   'web_search',
   'web_fetch',
   'dice',         // 纯计算、无 IO 与副作用，可并行
